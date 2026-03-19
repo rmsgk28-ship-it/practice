@@ -183,3 +183,231 @@ st.divider()
 st.caption(
     "본 앱의 수치는 업로드된 보고서의 요약 수치와 시각 자료를 바탕으로 구성한 프로토타입입니다."
 )
+import streamlit as st
+import pandas as pd
+import requests
+import plotly.express as px
+import feedparser
+
+st.set_page_config(
+    page_title="서울시 대기환경 보건 대시보드",
+    page_icon="🌫️",
+    layout="wide"
+)
+
+# -----------------------------
+# Custom UI Styling
+# -----------------------------
+
+st.markdown(
+"""
+<style>
+body {
+    background-color:#F5F7FA;
+}
+
+.main-title{
+    font-size:32px;
+    font-weight:700;
+    color:#1B3A57;
+}
+
+.metric-card{
+    background-color:white;
+    padding:20px;
+    border-radius:12px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.05);
+}
+
+.sidebar-news{
+    font-size:14px;
+}
+
+</style>
+""",
+unsafe_allow_html=True
+)
+
+# -----------------------------
+# Sidebar: News Widget
+# -----------------------------
+
+st.sidebar.title("📰 대기오염 뉴스")
+
+rss_url = "https://news.google.com/rss/search?q=대기오염+미세먼지&hl=ko&gl=KR&ceid=KR:ko"
+
+feed = feedparser.parse(rss_url)
+
+for entry in feed.entries[:10]:
+    st.sidebar.markdown(f"""
+    <div class="sidebar-news">
+    <a href="{entry.link}" target="_blank">{entry.title}</a>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.sidebar.divider()
+
+st.sidebar.info(
+"""
+서울시 보건환경연구원  
+대기환경 연구부 데이터 분석 대시보드
+"""
+)
+
+# -----------------------------
+# Title
+# -----------------------------
+
+st.markdown(
+'<div class="main-title">서울시 대기질 · 보건 통합 분석 대시보드</div>',
+unsafe_allow_html=True
+)
+
+st.caption("Seoul Institute of Health and Environment Research")
+
+# -----------------------------
+# KPI Cards
+# -----------------------------
+
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("PM2.5 ↔ 기관지 질환 상관계수", "0.84")
+col2.metric("PM2.5 10㎍/㎥ 증가 시 질환 위험", "1.15배")
+col3.metric("서울 평균 PM2.5", "26 ㎍/㎥")
+col4.metric("WHO 기준", "5 ㎍/㎥")
+
+st.divider()
+
+# -----------------------------
+# Real-time Dust Data
+# -----------------------------
+
+@st.cache_data(ttl=600)
+def get_dust_data():
+
+    url = "http://openapi.seoul.go.kr:8088/sample/json/RealtimeCityAir/1/25/"
+    res = requests.get(url)
+    data = res.json()
+
+    rows = []
+
+    for row in data['RealtimeCityAir']['row']:
+        rows.append({
+            "구":row["MSRSTE_NM"],
+            "PM10":row["PM10"],
+            "PM25":row["PM25"]
+        })
+
+    return pd.DataFrame(rows)
+
+dust_df = get_dust_data()
+
+# -----------------------------
+# GeoJSON
+# -----------------------------
+
+@st.cache_data
+def load_geo():
+
+    url = "https://raw.githubusercontent.com/southkorea/seoul-maps/master/kostat/2013/json/seoul_municipalities_geo_simple.json"
+    return requests.get(url).json()
+
+geojson = load_geo()
+
+# -----------------------------
+# Map
+# -----------------------------
+
+st.subheader("서울시 구별 미세먼지 지도")
+
+fig = px.choropleth_mapbox(
+    dust_df,
+    geojson=geojson,
+    locations="구",
+    featureidkey="properties.name",
+    color="PM25",
+    color_continuous_scale="Reds",
+    mapbox_style="carto-positron",
+    zoom=10,
+    center={"lat":37.5665,"lon":126.9780},
+    opacity=0.75,
+    hover_data=["PM10","PM25"]
+)
+
+fig.update_layout(
+    margin=dict(l=0,r=0,t=0,b=0),
+    height=500
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# -----------------------------
+# Region Detail
+# -----------------------------
+
+st.subheader("구별 대기질 상세")
+
+selected = st.selectbox("구 선택", dust_df["구"])
+
+row = dust_df[dust_df["구"] == selected].iloc[0]
+
+col1,col2 = st.columns(2)
+
+col1.metric("PM10", f"{row['PM10']} ㎍/㎥")
+col2.metric("PM2.5", f"{row['PM25']} ㎍/㎥")
+
+# -----------------------------
+# Report Data (from study)
+# -----------------------------
+
+report_df = pd.DataFrame(
+{
+"구":["강서구","중구","서초구","강동구","강북구"],
+"PM2.5":[55.7,57.3,50.8,46.0,41.3],
+"질환율":[18.2,19.5,15.1,11.5,9.8]
+}
+)
+
+st.divider()
+
+st.subheader("미세먼지와 기관지 질환 관계")
+
+fig2 = px.scatter(
+    report_df,
+    x="PM2.5",
+    y="질환율",
+    text="구",
+    size="질환율",
+    color="PM2.5",
+    color_continuous_scale="Reds"
+)
+
+fig2.update_traces(textposition="top center")
+
+st.plotly_chart(fig2,use_container_width=True)
+
+# -----------------------------
+# Policy Insight
+# -----------------------------
+
+st.subheader("정책 시사점")
+
+st.markdown("""
+- 행정구역 중심 관리의 한계
+- 보건 취약계층 중심 정책 필요
+- 교통 및 비도로 이동 오염원 관리 강화
+- 디지털 트윈 기반 대기질 예측 시스템 구축
+""")
+
+# -----------------------------
+# Footer
+# -----------------------------
+
+st.divider()
+
+st.caption(
+"""
+© Seoul Institute of Health & Environment Research  
+Data Analysis Division
+"""
+)
