@@ -1,5 +1,6 @@
 
 import json
+import math
 import re
 from urllib.request import urlopen
 
@@ -7,62 +8,153 @@ import folium
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
+from folium.features import GeoJsonPopup, GeoJsonTooltip
 from sklearn.preprocessing import MinMaxScaler
 from streamlit_folium import st_folium
-from streamlit_plotly_events import plotly_events
 
+# -----------------------------
+# 페이지 설정
+# -----------------------------
 st.set_page_config(
     page_title="서울, 처음이니? : 어디서 자취할까?",
-    page_icon="🏙️",
+    page_icon="🏠",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
 
-DISTRICTS = [
+# -----------------------------
+# 스타일
+# -----------------------------
+st.markdown("""
+<style>
+.block-container {
+    padding-top: 1.2rem;
+    padding-bottom: 2rem;
+    max-width: 1200px;
+}
+.main-title {
+    font-size: 2.2rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.15rem;
+}
+.sub-title {
+    color: #4b5563;
+    font-size: 1rem;
+    margin-bottom: 1.2rem;
+}
+.hero {
+    background: linear-gradient(135deg, #fff7fb 0%, #f7f7ff 45%, #eef8ff 100%);
+    border: 1px solid #ececf4;
+    border-radius: 22px;
+    padding: 1.2rem 1.3rem 1.0rem 1.3rem;
+    margin-bottom: 1rem;
+}
+.metric-card {
+    background: white;
+    border: 1px solid #ececf4;
+    border-radius: 18px;
+    padding: 1rem 1.1rem;
+    box-shadow: 0 6px 20px rgba(20,20,43,0.04);
+    height: 100%;
+}
+.metric-label {
+    color: #6b7280;
+    font-size: 0.9rem;
+    margin-bottom: 0.25rem;
+}
+.metric-value {
+    font-size: 1.65rem;
+    font-weight: 800;
+    color: #111827;
+}
+.metric-help {
+    color: #6b7280;
+    font-size: 0.82rem;
+    margin-top: 0.35rem;
+}
+.section-title {
+    font-size: 1.15rem;
+    font-weight: 800;
+    margin: 0.6rem 0 0.7rem 0;
+}
+.rec-card {
+    background: white;
+    border: 1px solid #ececf4;
+    border-radius: 20px;
+    padding: 1rem 1rem 0.9rem 1rem;
+    box-shadow: 0 8px 22px rgba(20,20,43,0.05);
+    margin-bottom: 0.9rem;
+}
+.rec-rank {
+    display: inline-block;
+    background: #111827;
+    color: white;
+    border-radius: 999px;
+    padding: 0.23rem 0.6rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-bottom: 0.55rem;
+}
+.rec-name {
+    font-size: 1.15rem;
+    font-weight: 800;
+    margin-bottom: 0.35rem;
+}
+.rec-score {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #2563eb;
+}
+.tag {
+    display: inline-block;
+    padding: 0.22rem 0.58rem;
+    margin: 0.12rem 0.2rem 0.12rem 0;
+    border-radius: 999px;
+    background: #f3f4f6;
+    color: #111827;
+    font-size: 0.82rem;
+}
+.small-note {
+    color: #6b7280;
+    font-size: 0.83rem;
+}
+.detail-card {
+    background: white;
+    border: 1px solid #ececf4;
+    border-radius: 20px;
+    padding: 1rem 1rem;
+    box-shadow: 0 8px 22px rgba(20,20,43,0.05);
+}
+.sidebar-guide {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 0.85rem 0.9rem;
+    font-size: 0.86rem;
+    color: #374151;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# -----------------------------
+# 유틸
+# -----------------------------
+FALLBACK_RENT = {
+    "강남구": 95, "강동구": 72, "강북구": 62, "강서구": 68, "관악구": 60,
+    "광진구": 78, "구로구": 63, "금천구": 58, "노원구": 60, "도봉구": 55,
+    "동대문구": 68, "동작구": 75, "마포구": 85, "서대문구": 70, "서초구": 92,
+    "성동구": 80, "성북구": 65, "송파구": 88, "양천구": 70, "영등포구": 75,
+    "용산구": 82, "은평구": 63, "종로구": 75, "중구": 78, "중랑구": 60,
+}
+
+SEOUL_DISTRICTS = [
     "강남구","강동구","강북구","강서구","관악구","광진구","구로구","금천구","노원구","도봉구",
     "동대문구","동작구","마포구","서대문구","서초구","성동구","성북구","송파구","양천구","영등포구",
     "용산구","은평구","종로구","중구","중랑구"
 ]
 
-GEOJSON_URL = "https://raw.githubusercontent.com/southkorea/seoul-maps/master/kostat/2013/json/seoul_municipalities_geo_simple.json"
-
-SEOUL_RENT_FALLBACK = {
-  "avg_monthly_rent": 74.5,
-  "median_monthly_rent": 55.0,
-  "monthly_count": 661645
-}
-
-DISTRICT_RENT_FALLBACK = {
-  "강남구": {"avg_monthly_rent": 131.7, "median_monthly_rent": 90.0, "avg_deposit": 21681.8, "monthly_count": 40200},
-  "강동구": {"avg_monthly_rent": 60.4, "median_monthly_rent": 48.0, "avg_deposit": 10152.1, "monthly_count": 35426},
-  "강북구": {"avg_monthly_rent": 54.4, "median_monthly_rent": 50.0, "avg_deposit": 3379.9, "monthly_count": 13578},
-  "강서구": {"avg_monthly_rent": 56.3, "median_monthly_rent": 54.0, "avg_deposit": 7715.4, "monthly_count": 46463},
-  "관악구": {"avg_monthly_rent": 54.5, "median_monthly_rent": 50.0, "avg_deposit": 4833.3, "monthly_count": 45896},
-  "광진구": {"avg_monthly_rent": 75.8, "median_monthly_rent": 65.0, "avg_deposit": 8408.9, "monthly_count": 22839},
-  "구로구": {"avg_monthly_rent": 52.2, "median_monthly_rent": 46.0, "avg_deposit": 6033.4, "monthly_count": 24860},
-  "금천구": {"avg_monthly_rent": 52.2, "median_monthly_rent": 50.0, "avg_deposit": 6627.1, "monthly_count": 18744},
-  "노원구": {"avg_monthly_rent": 56.9, "median_monthly_rent": 48.0, "avg_deposit": 6815.8, "monthly_count": 17668},
-  "도봉구": {"avg_monthly_rent": 54.5, "median_monthly_rent": 45.0, "avg_deposit": 3855.8, "monthly_count": 12373},
-  "동대문구": {"avg_monthly_rent": 65.9, "median_monthly_rent": 55.0, "avg_deposit": 6679.4, "monthly_count": 24731},
-  "동작구": {"avg_monthly_rent": 65.9, "median_monthly_rent": 57.0, "avg_deposit": 7631.6, "monthly_count": 26126},
-  "마포구": {"avg_monthly_rent": 92.1, "median_monthly_rent": 70.0, "avg_deposit": 8909.2, "monthly_count": 28505},
-  "서대문구": {"avg_monthly_rent": 66.4, "median_monthly_rent": 57.0, "avg_deposit": 6273.9, "monthly_count": 19089},
-  "서초구": {"avg_monthly_rent": 127.2, "median_monthly_rent": 84.0, "avg_deposit": 25223.9, "monthly_count": 21351},
-  "성동구": {"avg_monthly_rent": 89.9, "median_monthly_rent": 70.0, "avg_deposit": 12918.7, "monthly_count": 18222},
-  "성북구": {"avg_monthly_rent": 58.7, "median_monthly_rent": 50.0, "avg_deposit": 5100.0, "monthly_count": 22348},
-  "송파구": {"avg_monthly_rent": 86.9, "median_monthly_rent": 68.0, "avg_deposit": 14084.1, "monthly_count": 40044},
-  "양천구": {"avg_monthly_rent": 63.7, "median_monthly_rent": 53.0, "avg_deposit": 10255.1, "monthly_count": 20325},
-  "영등포구": {"avg_monthly_rent": 86.4, "median_monthly_rent": 70.0, "avg_deposit": 10709.9, "monthly_count": 36689},
-  "용산구": {"avg_monthly_rent": 119.4, "median_monthly_rent": 90.0, "avg_deposit": 13674.3, "monthly_count": 17458},
-  "은평구": {"avg_monthly_rent": 59.1, "median_monthly_rent": 53.0, "avg_deposit": 8069.1, "monthly_count": 34761},
-  "종로구": {"avg_monthly_rent": 91.4, "median_monthly_rent": 70.0, "avg_deposit": 8147.9, "monthly_count": 19059},
-  "중구": {"avg_monthly_rent": 106.8, "median_monthly_rent": 85.0, "avg_deposit": 9957.7, "monthly_count": 20562},
-  "중랑구": {"avg_monthly_rent": 51.1, "median_monthly_rent": 45.0, "avg_deposit": 6382.3, "monthly_count": 21060}
-}
-
-DISTRICT_CENTERS = {
+DISTRICT_CENTER = {
     "강남구": [37.5172, 127.0473], "강동구": [37.5301, 127.1238], "강북구": [37.6397, 127.0257],
     "강서구": [37.5509, 126.8495], "관악구": [37.4784, 126.9516], "광진구": [37.5385, 127.0822],
     "구로구": [37.4954, 126.8874], "금천구": [37.4602, 126.9006], "노원구": [37.6542, 127.0568],
@@ -74,721 +166,509 @@ DISTRICT_CENTERS = {
     "중랑구": [37.6063, 127.0927]
 }
 
-CATEGORY_COLORS = {
-    "미술관/갤러리": "#F87171",
-    "공연장": "#60A5FA",
-    "박물관/기념관": "#34D399",
-    "문화원": "#FBBF24",
-    "문화예술회관": "#A78BFA",
-    "도서관": "#22C55E",
-    "기타": "#94A3B8",
-}
-
-st.markdown("""
-<style>
-:root {
-  --bg: #F6F8FC;
-  --surface: #FFFFFF;
-  --text: #14213D;
-  --muted: #667085;
-  --border: #E5E7EB;
-  --primary: #0F62FE;
-  --secondary: #7C3AED;
-  --good: #10B981;
-  --warn: #F59E0B;
-}
-.stApp {
-    background: linear-gradient(180deg, #F7F9FC 0%, #EDF3FF 100%);
-}
-.block-container {
-    padding-top: 1.2rem;
-    padding-bottom: 2rem;
-    max-width: 1300px;
-}
-.hero {
-    background: linear-gradient(135deg, rgba(15,98,254,0.98), rgba(124,58,237,0.96));
-    color: white;
-    border-radius: 24px;
-    padding: 28px 30px 24px 30px;
-    box-shadow: 0 18px 40px rgba(15,98,254,0.15);
-    margin-bottom: 18px;
-}
-.hero h1 {
-    font-size: 2rem;
-    margin: 0 0 6px 0;
-}
-.hero p {
-    margin: 0;
-    opacity: 0.95;
-    font-size: 1rem;
-}
-.section-card {
-    background: rgba(255,255,255,0.95);
-    border: 1px solid rgba(229,231,235,0.8);
-    border-radius: 22px;
-    padding: 18px 18px 14px 18px;
-    box-shadow: 0 8px 24px rgba(15,23,42,0.05);
-}
-.metric-card {
-    background: white;
-    border: 1px solid #E5E7EB;
-    border-radius: 18px;
-    padding: 16px 18px;
-    box-shadow: 0 6px 18px rgba(15,23,42,0.04);
-    min-height: 112px;
-}
-.metric-label {
-    color: #667085;
-    font-size: 0.88rem;
-    margin-bottom: 4px;
-}
-.metric-value {
-    color: #111827;
-    font-size: 1.75rem;
-    font-weight: 800;
-    line-height: 1.2;
-}
-.metric-sub {
-    color: #667085;
-    font-size: 0.85rem;
-}
-.rank-card {
-    background: white;
-    border: 1px solid #E5E7EB;
-    border-radius: 18px;
-    padding: 16px;
-    box-shadow: 0 8px 22px rgba(15,23,42,0.05);
-    min-height: 170px;
-}
-.rank-badge {
-    display:inline-block;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: #EEF4FF;
-    color: #0F62FE;
-    font-weight: 700;
-    font-size: 0.8rem;
-    margin-bottom: 8px;
-}
-.rank-title {
-    font-size: 1.15rem;
-    font-weight: 800;
-    color: #0F172A;
-}
-.rank-score {
-    font-size: 1.9rem;
-    font-weight: 800;
-    color: #0F62FE;
-}
-.small-muted { color:#667085; font-size:0.84rem; }
-.pill {
-    display:inline-block;
-    border-radius:999px;
-    padding: 4px 10px;
-    margin: 0 6px 6px 0;
-    background:#F3F4F6;
-    color:#334155;
-    font-size:0.8rem;
-    font-weight:600;
-}
-.selected-chip {
-    display:inline-block;
-    border-radius:999px;
-    padding:6px 12px;
-    background:#E0EAFF;
-    color:#0F62FE;
-    font-weight:700;
-    margin-top:2px;
-}
-.guide {
-    background:#F8FAFC;
-    border:1px solid #E2E8F0;
-    border-radius:16px;
-    padding:12px 14px;
-    color:#475467;
-    font-size:0.88rem;
-}
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
-}
-div[data-testid="stVerticalBlock"] div:has(> div.map-hint) {
-    margin-bottom: 0 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
+def safe_round_int(value):
+    if pd.isna(value):
+        return None
+    return int(round(float(value)))
 
 @st.cache_data(show_spinner=False)
-def read_csv_auto(path: str) -> pd.DataFrame:
-    for enc in ("utf-8-sig", "cp949", "euc-kr", "utf-8"):
+def read_csv_flexible(path: str) -> pd.DataFrame:
+    last_error = None
+    for enc in ["utf-8", "utf-8-sig", "cp949", "euc-kr"]:
         try:
             return pd.read_csv(path, encoding=enc)
-        except Exception:
-            continue
-    return pd.read_csv(path, encoding_errors="ignore")
-
+        except Exception as e:
+            last_error = e
+    raise last_error
 
 @st.cache_data(show_spinner=False)
-def read_excel_auto(path: str) -> pd.DataFrame:
+def read_excel_flexible(path: str) -> pd.DataFrame:
     return pd.read_excel(path)
 
-
-def extract_gu(text: str):
+def extract_district(text):
     if pd.isna(text):
         return None
     text = str(text)
-    m = re.search(r"(강남구|강동구|강북구|강서구|관악구|광진구|구로구|금천구|노원구|도봉구|동대문구|동작구|마포구|서대문구|서초구|성동구|성북구|송파구|양천구|영등포구|용산구|은평구|종로구|중구|중랑구)", text)
-    return m.group(1) if m else None
+    match = re.search(r"(강남구|강동구|강북구|강서구|관악구|광진구|구로구|금천구|노원구|도봉구|동대문구|동작구|마포구|서대문구|서초구|성동구|성북구|송파구|양천구|영등포구|용산구|은평구|종로구|중구|중랑구)", text)
+    return match.group(1) if match else None
 
+def categorize_culture(topic):
+    if pd.isna(topic):
+        return "기타"
+    t = str(topic)
+    if "미술" in t or "갤러리" in t:
+        return "미술관·갤러리"
+    if "박물관" in t or "기념관" in t:
+        return "박물관·기념관"
+    if "공연" in t or "극장" in t or "연극" in t or "오페라" in t:
+        return "공연장"
+    if "도서관" in t:
+        return "도서관"
+    if "문화원" in t or "문화의집" in t or "문화센터" in t or "예술회관" in t:
+        return "문화센터·예술회관"
+    if "영화" in t or "시네마" in t:
+        return "영화관"
+    return t if len(t) <= 14 else "기타"
 
 @st.cache_data(show_spinner=False)
 def load_geojson():
-    with urlopen(GEOJSON_URL, timeout=10) as r:
-        return json.loads(r.read().decode("utf-8"))
-
+    url = "https://raw.githubusercontent.com/southkorea/seoul-maps/master/kostat/2013/json/seoul_municipalities_geo_simple.json"
+    with urlopen(url, timeout=10) as response:
+        return json.load(response)
 
 @st.cache_data(show_spinner=False)
-def load_datasets():
-    culture = read_csv_auto("서울시 문화공간 정보.csv")
-    library = read_csv_auto("서울시 공공도서관 현황정보.csv")
-    subway = read_csv_auto("서울교통공사_역주소 및 전화번호.csv")
-    parks = read_excel_auto("서울시 주요 공원현황(2026 상반기).xlsx")
-    price = read_csv_auto("생필품 농수축산물 가격 정보(2024년).csv")
+def load_all_data():
+    culture = read_csv_flexible("서울시 문화공간 정보.csv").copy()
+    library = read_csv_flexible("서울시 공공도서관 현황정보.csv").copy()
+    subway = read_csv_flexible("서울교통공사_역주소 및 전화번호.csv").copy()
+    parks = read_excel_flexible("서울시 주요 공원현황(2026 상반기).xlsx").copy()
+    prices = read_csv_flexible("생필품 농수축산물 가격 정보(2024년).csv").copy()
 
+    # 문화공간
     culture["자치구"] = culture["자치구"].astype(str).str.strip()
-    culture = culture[culture["자치구"].isin(DISTRICTS)].copy()
+    culture = culture[culture["자치구"].isin(SEOUL_DISTRICTS)]
+    culture["문화카테고리"] = culture["주제분류"].apply(categorize_culture)
     culture["위도"] = pd.to_numeric(culture["위도"], errors="coerce")
     culture["경도"] = pd.to_numeric(culture["경도"], errors="coerce")
-    culture["주제분류"] = culture["주제분류"].fillna("기타").replace({"nan": "기타"})
 
-    library["자치구"] = library["구명"].astype(str).str.strip()
-    library = library[library["자치구"].isin(DISTRICTS)].copy()
-    library["위도"] = pd.to_numeric(library["위도"], errors="coerce")
-    library["경도"] = pd.to_numeric(library["경도"], errors="coerce")
+    # 도서관
+    library["구명"] = library["구명"].astype(str).str.strip()
+    library = library[library["구명"].isin(SEOUL_DISTRICTS)]
 
-    subway["자치구"] = subway["도로명주소"].apply(extract_gu)
-    subway["자치구"] = subway["자치구"].fillna(subway["구주소"].apply(extract_gu))
-    subway = subway[subway["자치구"].isin(DISTRICTS)].copy()
+    # 지하철
+    subway["자치구"] = subway["도로명주소"].apply(extract_district)
+    subway["자치구"] = subway["자치구"].fillna(subway["구주소"].apply(extract_district))
+    subway = subway[subway["자치구"].isin(SEOUL_DISTRICTS)]
 
-    parks["자치구"] = parks["지역"].astype(str).str.strip()
-    parks = parks[parks["자치구"].isin(DISTRICTS)].copy()
+    # 공원
+    district_col = "지역" if "지역" in parks.columns else "자치구"
+    parks[district_col] = parks[district_col].astype(str).str.strip()
+    parks = parks[parks[district_col].isin(SEOUL_DISTRICTS)]
     parks["위도"] = pd.to_numeric(parks["Y좌표(WGS84)"], errors="coerce")
     parks["경도"] = pd.to_numeric(parks["X좌표(WGS84)"], errors="coerce")
 
-    price["자치구"] = price["자치구 이름"].astype(str).str.strip()
-    price = price[price["자치구"].isin(DISTRICTS)].copy()
-    price["가격(원)"] = pd.to_numeric(price["가격(원)"], errors="coerce")
+    # 생활물가
+    prices["자치구 이름"] = prices["자치구 이름"].astype(str).str.strip()
+    prices = prices[prices["자치구 이름"].isin(SEOUL_DISTRICTS)]
+    prices["가격(원)"] = pd.to_numeric(prices["가격(원)"], errors="coerce")
 
-    return culture, library, subway, parks, price
-
-
-@st.cache_data(show_spinner=False)
-def get_rent_summary():
+    # 월세 (있으면 실제 CSV 사용, 없으면 보고서 fallback)
+    rent_source = "fallback"
+    rent_city_avg = int(round(pd.Series(FALLBACK_RENT).mean()))
+    rent_df = pd.DataFrame({"자치구": list(FALLBACK_RENT.keys()), "평균월세": list(FALLBACK_RENT.values())})
     try:
-        rent = read_csv_auto("서울특별시_전월세가_2025.csv")
-        rent["임대료(만원)"] = pd.to_numeric(rent["임대료(만원)"], errors="coerce")
-        rent["보증금(만원)"] = pd.to_numeric(rent["보증금(만원)"], errors="coerce")
-        month = rent[(rent["전월세구분"] == "월세") & (rent["임대료(만원)"] > 0)].copy()
-        district = (
-            month.groupby("자치구명")
-            .agg(
-                avg_monthly_rent=("임대료(만원)", "mean"),
-                median_monthly_rent=("임대료(만원)", "median"),
-                avg_deposit=("보증금(만원)", "mean"),
-                monthly_count=("임대료(만원)", "size"),
-            )
-            .round(1)
-            .reset_index()
-            .rename(columns={"자치구명": "자치구"})
-        )
-        overall = {
-            "avg_monthly_rent": round(float(month["임대료(만원)"].mean()), 1),
-            "median_monthly_rent": round(float(month["임대료(만원)"].median()), 1),
-            "monthly_count": int(len(month)),
-        }
-        return district, overall, True
+        rent_raw = read_csv_flexible("서울특별시_전월세가_2025.csv").copy()
+        rent_raw["전월세구분"] = rent_raw["전월세구분"].astype(str)
+        rent_raw["임대료(만원)"] = pd.to_numeric(rent_raw["임대료(만원)"], errors="coerce")
+        rent_raw["자치구명"] = rent_raw["자치구명"].astype(str).str.strip()
+        monthly = rent_raw[(rent_raw["전월세구분"].str.contains("월세")) & (rent_raw["임대료(만원)"] > 0)]
+        monthly = monthly[monthly["자치구명"].isin(SEOUL_DISTRICTS)]
+        by_dist = monthly.groupby("자치구명")["임대료(만원)"].mean().round().astype(int).reset_index()
+        by_dist.columns = ["자치구", "평균월세"]
+        if len(by_dist) >= 20:
+            rent_df = by_dist
+            rent_city_avg = int(round(monthly["임대료(만원)"].mean()))
+            rent_source = "csv"
     except Exception:
-        district = pd.DataFrame(
-            [{"자치구": k, **v} for k, v in DISTRICT_RENT_FALLBACK.items()]
-        )
-        return district, SEOUL_RENT_FALLBACK, False
+        pass
 
+    # 집계
+    district_base = pd.DataFrame({"자치구": SEOUL_DISTRICTS})
+    district_base["문화공간수"] = district_base["자치구"].map(culture.groupby("자치구").size()).fillna(0).astype(int)
+    district_base["도서관수"] = district_base["자치구"].map(library.groupby("구명").size()).fillna(0).astype(int)
+    district_base["공원수"] = district_base["자치구"].map(parks.groupby(district_col).size()).fillna(0).astype(int)
+    district_base["지하철역수"] = district_base["자치구"].map(subway.groupby("자치구").size()).fillna(0).astype(int)
+    district_base["생활물가평균"] = district_base["자치구"].map(prices.groupby("자치구 이름")["가격(원)"].mean()).round().fillna(0).astype(int)
+    district_base = district_base.merge(rent_df, on="자치구", how="left")
+    district_base["평균월세"] = district_base["평균월세"].fillna(pd.Series(FALLBACK_RENT)).fillna(0).astype(int)
 
-def minmax_inverse(series: pd.Series) -> pd.Series:
-    s = pd.to_numeric(series, errors="coerce").fillna(0)
-    if s.max() == s.min():
-        return pd.Series(np.ones(len(s)), index=s.index)
-    return 1 - (s - s.min()) / (s.max() - s.min())
-
-
-def minmax_positive(series: pd.Series) -> pd.Series:
-    s = pd.to_numeric(series, errors="coerce").fillna(0)
-    if s.max() == s.min():
-        return pd.Series(np.ones(len(s)), index=s.index)
-    return (s - s.min()) / (s.max() - s.min())
-
-
-@st.cache_data(show_spinner=False)
-def build_summary(culture, library, subway, parks, price, rent_summary):
-    base = pd.DataFrame({"자치구": DISTRICTS})
-
-    latest_month = None
-    try:
-        parsed = pd.to_datetime(price["년도-월"], format="%b-%y", errors="coerce")
-        if parsed.notna().any():
-            latest_month = parsed.max()
-            price_ref = price[parsed == latest_month].copy()
-        else:
-            price_ref = price.copy()
-    except Exception:
-        price_ref = price.copy()
-
-    culture_count = culture.groupby("자치구").size().rename("문화공간수")
-    culture_type_count = culture.groupby("자치구")["주제분류"].nunique().rename("문화다양성")
-    library_count = library.groupby("자치구").size().rename("도서관수")
-    park_count = parks.groupby("자치구").size().rename("공원수")
-    station_count = subway.groupby("자치구")["역명"].nunique().rename("지하철역수")
-    line_count = subway.groupby("자치구")["호선"].nunique().rename("호선수")
-    price_mean = price_ref.groupby("자치구")["가격(원)"].mean().round().rename("생활물가평균")
-
-    summary = (
-        base.set_index("자치구")
-        .join([culture_count, culture_type_count, library_count, park_count, station_count, line_count, price_mean])
-        .fillna(0)
-        .reset_index()
-    )
-
-    summary["문화공간수"] = summary["문화공간수"].astype(int)
-    summary["문화다양성"] = summary["문화다양성"].astype(int)
-    summary["도서관수"] = summary["도서관수"].astype(int)
-    summary["공원수"] = summary["공원수"].astype(int)
-    summary["지하철역수"] = summary["지하철역수"].astype(int)
-    summary["호선수"] = summary["호선수"].astype(int)
-    summary["생활물가평균"] = summary["생활물가평균"].astype(int)
-
-    summary = summary.merge(rent_summary, on="자치구", how="left")
-
-    top_categories = (
-        culture.groupby(["자치구", "주제분류"]).size().reset_index(name="개수")
+    # 문화 카테고리 요약
+    culture_type_counts = (
+        culture.groupby(["자치구", "문화카테고리"]).size().reset_index(name="개수")
         .sort_values(["자치구", "개수"], ascending=[True, False])
     )
-    top_text = {}
-    for gu in DISTRICTS:
-        temp = top_categories[top_categories["자치구"] == gu].head(3)
-        top_text[gu] = " · ".join([f"{r['주제분류']} {int(r['개수'])}" for _, r in temp.iterrows()]) if not temp.empty else "문화 데이터 없음"
-    summary["많은문화생활"] = summary["자치구"].map(top_text)
 
-    line_text = subway.groupby("자치구")["호선"].apply(lambda s: ", ".join(sorted(s.dropna().astype(str).unique()))).to_dict()
-    summary["주요호선"] = summary["자치구"].map(line_text).fillna("-")
-
-    if latest_month is not None:
-        price_month_label = latest_month.strftime("%Y-%m")
-    else:
-        price_month_label = "전체 기간 평균"
-
-    return summary, price_month_label
-
-
-def score_candidates(df, weights):
-    work = df.copy()
-
-    work["월세점수"] = minmax_inverse(work["avg_monthly_rent"])
-    work["물가점수"] = minmax_inverse(work["생활물가평균"])
-    work["교통점수"] = (
-        minmax_positive(work["지하철역수"]) * 0.6 + minmax_positive(work["호선수"]) * 0.4
+    # 지하철 호선 문자열
+    subway_line_summary = (
+        subway.groupby("자치구")["호선"]
+        .apply(lambda s: ", ".join(sorted(pd.Series(s).dropna().astype(str).unique().tolist())))
+        .reset_index(name="주요호선")
     )
-    work["문화점수"] = (
-        minmax_positive(work["문화공간수"]) * 0.7 + minmax_positive(work["문화다양성"]) * 0.3
-    )
-    work["공원점수"] = minmax_positive(work["공원수"])
-    work["도서관점수"] = minmax_positive(work["도서관수"])
+    district_base = district_base.merge(subway_line_summary, on="자치구", how="left")
+    district_base["주요호선"] = district_base["주요호선"].fillna("-")
+
+    # 서울 평균 생활물가
+    city_price_avg = int(round(prices["가격(원)"].mean()))
+    return district_base, culture, library, subway, parks, prices, culture_type_counts, rent_city_avg, rent_source, district_col, city_price_avg
+
+def make_score_frame(base_df, weights):
+    score_df = base_df.copy()
+    scaler = MinMaxScaler()
+
+    score_columns = ["문화공간수", "도서관수", "공원수", "지하철역수"]
+    score_df[[f"{c}_정규화" for c in score_columns]] = scaler.fit_transform(score_df[score_columns])
+
+    # 낮을수록 좋은 값은 뒤집기
+    price_scaled = scaler.fit_transform(score_df[["생활물가평균"]])
+    rent_scaled = scaler.fit_transform(score_df[["평균월세"]])
+
+    score_df["생활물가점수"] = 1 - price_scaled
+    score_df["월세점수"] = 1 - rent_scaled
+    score_df["문화점수"] = score_df["문화공간수_정규화"]
+    score_df["도서관점수"] = score_df["도서관수_정규화"]
+    score_df["공원점수"] = score_df["공원수_정규화"]
+    score_df["교통점수"] = score_df["지하철역수_정규화"]
 
     total = sum(weights.values())
     if total == 0:
-        weights = {k: 1 for k in weights}
-        total = len(weights)
+        total = 1
 
-    work["추천점수"] = (
-        work["월세점수"] * weights["월세"]
-        + work["물가점수"] * weights["물가"]
-        + work["교통점수"] * weights["교통"]
-        + work["문화점수"] * weights["문화"]
-        + work["공원점수"] * weights["공원"]
-        + work["도서관점수"] * weights["도서관"]
-    ) / total * 100
+    score_df["추천점수"] = (
+        score_df["월세점수"] * weights["월세"] +
+        score_df["생활물가점수"] * weights["물가"] +
+        score_df["교통점수"] * weights["교통"] +
+        score_df["문화점수"] * weights["문화"] +
+        score_df["공원점수"] * weights["공원"] +
+        score_df["도서관점수"] * weights["도서관"]
+    ) / total
 
-    return work.sort_values(["추천점수", "월세점수"], ascending=[False, False])
+    score_df["추천점수_100"] = (score_df["추천점수"] * 100).round(1)
+    return score_df.sort_values("추천점수", ascending=False).reset_index(drop=True)
 
+def district_reason(row):
+    reasons = []
+    if row["월세점수"] >= 0.65:
+        reasons.append("월세 부담이 비교적 낮아요")
+    if row["생활물가점수"] >= 0.65:
+        reasons.append("생활물가가 상대적으로 안정적이에요")
+    if row["교통점수"] >= 0.65:
+        reasons.append("지하철 접근성이 좋아요")
+    if row["문화점수"] >= 0.65:
+        reasons.append("문화공간이 풍부해요")
+    if row["공원점수"] >= 0.65:
+        reasons.append("공원·녹지 접근성이 좋아요")
+    if row["도서관점수"] >= 0.65:
+        reasons.append("도서관 이용이 편리해요")
+    return reasons[:3] if reasons else ["전체 지표가 고르게 무난해요"]
 
-def format_money(value, suffix="만원"):
-    if pd.isna(value):
-        return "-"
-    return f"{value:,.1f}{suffix}"
+district_df, culture, library, subway, parks, prices, culture_type_counts, rent_city_avg, rent_source, park_district_col, city_price_avg = load_all_data()
 
+# -----------------------------
+# 헤더
+# -----------------------------
+st.markdown('<div class="hero">', unsafe_allow_html=True)
+st.markdown('<div class="main-title">서울, 처음이니? : 어디서 자취할까?</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">월세, 교통, 문화생활, 공원, 도서관, 생활물가를 한 번에 비교해서 나에게 맞는 서울 자치구를 찾아보세요.</div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
-def comparison_text(district_avg, seoul_avg):
-    if pd.isna(district_avg):
-        return "비교 데이터 없음"
-    delta = district_avg - seoul_avg
-    pct = abs(delta) / seoul_avg * 100 if seoul_avg else 0
-    if delta < 0:
-        return f"서울 평균보다 {abs(delta):.1f}만원 저렴 ({pct:.0f}%↓)"
-    if delta > 0:
-        return f"서울 평균보다 {abs(delta):.1f}만원 높음 ({pct:.0f}%↑)"
-    return "서울 평균과 비슷함"
-
-
-def render_metric_card(label, value, sub):
+# -----------------------------
+# 사이드바
+# -----------------------------
+with st.sidebar:
+    st.header("우선순위 설정")
     st.markdown(
-        f"""
-        <div class="metric-card">
-          <div class="metric-label">{label}</div>
-          <div class="metric-value">{value}</div>
-          <div class="metric-sub">{sub}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+        '<div class="sidebar-guide">'
+        '<b>중요도 가이드</b><br>'
+        '0 = 거의 안 봄<br>'
+        '1~2 = 조금 참고<br>'
+        '3 = 보통 중요<br>'
+        '4 = 꽤 중요<br>'
+        '5 = 가장 중요'
+        '</div>',
+        unsafe_allow_html=True
+    )
+    w_rent = st.slider("월세", 0, 5, 5)
+    w_price = st.slider("생활물가", 0, 5, 3)
+    w_transport = st.slider("교통(지하철)", 0, 5, 4)
+    w_culture = st.slider("문화생활", 0, 5, 3)
+    w_park = st.slider("공원·녹지", 0, 5, 2)
+    w_library = st.slider("도서관", 0, 5, 2)
+
+    st.markdown("---")
+    district_options = ["전체 보기"] + SEOUL_DISTRICTS
+    selected_district = st.selectbox("자치구 상세 보기", district_options, index=0)
+
+weights = {
+    "월세": w_rent,
+    "물가": w_price,
+    "교통": w_transport,
+    "문화": w_culture,
+    "공원": w_park,
+    "도서관": w_library,
+}
+
+score_df = make_score_frame(district_df, weights)
+
+if selected_district == "전체 보기":
+    detail_district = score_df.iloc[0]["자치구"]
+else:
+    detail_district = selected_district
+
+detail_row = score_df[score_df["자치구"] == detail_district].iloc[0]
+
+# -----------------------------
+# 주요 지표
+# -----------------------------
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    st.markdown(
+        f'<div class="metric-card"><div class="metric-label">서울 전체 평균 월세</div>'
+        f'<div class="metric-value">{rent_city_avg}만원</div>'
+        f'<div class="metric-help">{"전월세 CSV 기준" if rent_source=="csv" else "보고서 요약값 기준"}</div></div>',
+        unsafe_allow_html=True
+    )
+with c2:
+    diff = detail_row["평균월세"] - rent_city_avg
+    diff_txt = f"서울 평균보다 {abs(diff)}만원 {'비싸요' if diff > 0 else '저렴해요' if diff < 0 else '비슷해요'}"
+    st.markdown(
+        f'<div class="metric-card"><div class="metric-label">{detail_district} 평균 월세</div>'
+        f'<div class="metric-value">{int(detail_row["평균월세"])}만원</div>'
+        f'<div class="metric-help">{diff_txt}</div></div>',
+        unsafe_allow_html=True
+    )
+with c3:
+    st.markdown(
+        f'<div class="metric-card"><div class="metric-label">서울 평균 생활물가</div>'
+        f'<div class="metric-value">{city_price_avg:,}원</div>'
+        f'<div class="metric-help">업로드한 생활물가 CSV 평균</div></div>',
+        unsafe_allow_html=True
+    )
+with c4:
+    st.markdown(
+        f'<div class="metric-card"><div class="metric-label">{detail_district} 추천 점수</div>'
+        f'<div class="metric-value">{detail_row["추천점수_100"]}점</div>'
+        f'<div class="metric-help">현재 우선순위 기준</div></div>',
+        unsafe_allow_html=True
     )
 
-
-culture, library, subway, parks, price = load_datasets()
-rent_summary, seoul_rent, used_uploaded_rent = get_rent_summary()
-summary, price_month_label = build_summary(culture, library, subway, parks, price, rent_summary)
-
-if "selected_gu" not in st.session_state:
-    st.session_state.selected_gu = "마포구"
-
-preset = st.sidebar.selectbox(
-    "추천 모드",
-    ["균형형", "가성비 우선", "교통 우선", "문화생활 우선", "공원/힐링 우선", "직접 설정"],
-    index=0,
-)
-
-preset_weights = {
-    "균형형": {"월세": 4, "물가": 3, "교통": 4, "문화": 4, "공원": 2, "도서관": 2},
-    "가성비 우선": {"월세": 5, "물가": 5, "교통": 3, "문화": 2, "공원": 1, "도서관": 2},
-    "교통 우선": {"월세": 3, "물가": 2, "교통": 5, "문화": 3, "공원": 1, "도서관": 1},
-    "문화생활 우선": {"월세": 2, "물가": 2, "교통": 3, "문화": 5, "공원": 3, "도서관": 1},
-    "공원/힐링 우선": {"월세": 2, "물가": 2, "교통": 2, "문화": 2, "공원": 5, "도서관": 2},
-    "직접 설정": {"월세": 4, "물가": 3, "교통": 4, "문화": 4, "공원": 2, "도서관": 2},
-}
-default_weights = preset_weights[preset]
-
-st.sidebar.markdown('<div class="guide"><b>중요도 가이드</b><br>1 = 크게 중요하지 않음 · 3 = 보통 · 5 = 매우 중요함<br>예산을 특히 중시하면 <b>월세</b>와 <b>생활물가</b>를 높이고, 놀거리와 전시를 좋아하면 <b>문화생활</b>을 높여 보세요.</div>', unsafe_allow_html=True)
-weights = {
-    "월세": st.sidebar.slider("월세", 0, 5, default_weights["월세"]),
-    "물가": st.sidebar.slider("생활물가", 0, 5, default_weights["물가"]),
-    "교통": st.sidebar.slider("지하철/교통", 0, 5, default_weights["교통"]),
-    "문화": st.sidebar.slider("문화생활", 0, 5, default_weights["문화"]),
-    "공원": st.sidebar.slider("공원/녹지", 0, 5, default_weights["공원"]),
-    "도서관": st.sidebar.slider("도서관/공부환경", 0, 5, default_weights["도서관"]),
-}
-
-budget_cap = st.sidebar.slider(
-    "희망 월세 상한 (만원)",
-    40, 140, 85,
-    help="자치구 평균 월세 기준으로 필터링됩니다."
-)
-preferred_line = st.sidebar.selectbox(
-    "선호 지하철 호선",
-    ["상관없음"] + sorted(subway["호선"].dropna().astype(str).unique().tolist())
-)
-
-ranked = score_candidates(summary, weights)
-candidates = ranked[ranked["avg_monthly_rent"] <= budget_cap].copy()
-if preferred_line != "상관없음":
-    candidates = candidates[candidates["주요호선"].str.contains(preferred_line, na=False)].copy()
-if candidates.empty:
-    candidates = ranked.copy()
-
-selected_gu_from_select = st.sidebar.selectbox(
-    "직접 보고 싶은 자치구",
-    DISTRICTS,
-    index=DISTRICTS.index(st.session_state.selected_gu) if st.session_state.selected_gu in DISTRICTS else 0
-)
-st.session_state.selected_gu = selected_gu_from_select
-
-top5 = candidates.head(5).copy()
-selected_row = ranked[ranked["자치구"] == st.session_state.selected_gu].iloc[0]
-
-st.markdown(
-    """
-    <div class="hero">
-      <h1>서울, 처음이니? : 어디서 자취할까?</h1>
-      <p>서울 25개 자치구의 월세, 생활물가, 지하철, 공원, 문화공간, 도서관 데이터를 한눈에 비교해서
-      <b>내 취향에 맞는 자취 지역</b>을 찾는 추천 플랫폼입니다.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-m1, m2, m3, m4 = st.columns(4)
-with m1:
-    render_metric_card("서울 전체 평균 월세", f"{seoul_rent['avg_monthly_rent']:.1f}만원", f"월세 계약 {seoul_rent['monthly_count']:,}건 기준")
-with m2:
-    render_metric_card("현재 선택 지역", f"{selected_row['자치구']}", comparison_text(selected_row['avg_monthly_rent'], seoul_rent["avg_monthly_rent"]))
-with m3:
-    render_metric_card("선택 지역 평균 월세", f"{selected_row['avg_monthly_rent']:.1f}만원", f"중앙값 {selected_row['median_monthly_rent']:.1f}만원")
-with m4:
-    render_metric_card("선택 지역 생활물가 평균", f"{int(round(selected_row['생활물가평균'])):,}원", f"{price_month_label} 기준 평균 가격")
-
-tab1, tab2, tab3, tab4 = st.tabs(["추천 결과", "서울 지도", "문화생활", "데이터 비교"])
+# -----------------------------
+# 추천 / 지도 / 문화생활
+# -----------------------------
+tab1, tab2, tab3, tab4 = st.tabs(["추천 결과", "서울 지도", "지역 상세", "데이터 보기"])
 
 with tab1:
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.subheader("당신에게 맞는 자취 추천 TOP 5")
-    st.caption("현재 설정한 중요도와 월세 상한을 바탕으로 계산했습니다.")
-    cols = st.columns(5)
-    medals = ["🥇", "🥈", "🥉", "4위", "5위"]
-    for idx, (_, row) in enumerate(top5.iterrows()):
-        with cols[idx]:
-            cheap_text = comparison_text(row["avg_monthly_rent"], seoul_rent["avg_monthly_rent"])
-            st.markdown(
-                f"""
-                <div class="rank-card">
-                  <div class="rank-badge">{medals[idx]}</div>
-                  <div class="rank-title">{row['자치구']}</div>
-                  <div class="rank-score">{row['추천점수']:.1f}</div>
-                  <div class="small-muted">추천 점수</div>
-                  <hr style="border:none;border-top:1px solid #EEF2F7;margin:10px 0 12px 0;">
-                  <div class="small-muted">평균 월세 <b>{row['avg_monthly_rent']:.1f}만원</b></div>
-                  <div class="small-muted">{cheap_text}</div>
-                  <div class="small-muted" style="margin-top:8px;">주요 호선: {row['주요호선']}</div>
-                  <div class="small-muted" style="margin-top:8px;">문화생활: {row['많은문화생활']}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="section-title">우선순위에 맞는 추천 지역 TOP 5</div>', unsafe_allow_html=True)
+    top5 = score_df.head(5)
+    cols = st.columns(3)
+    for i, (_, row) in enumerate(top5.iloc[:3].iterrows()):
+        with cols[i]:
+            reasons = district_reason(row)
+            st.markdown(f"""
+            <div class="rec-card">
+                <div class="rec-rank">TOP {i+1}</div>
+                <div class="rec-name">{row['자치구']}</div>
+                <div class="rec-score">{row['추천점수_100']}점</div>
+                <div class="small-note" style="margin-top:0.3rem;">평균 월세 {int(row['평균월세'])}만원 · 생활물가 {int(row['생활물가평균']):,}원</div>
+                <div style="margin-top:0.55rem;">{"".join([f'<span class="tag">{r}</span>' for r in reasons])}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-    left, right = st.columns([1.2, 1])
-    with left:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.subheader(f"{selected_row['자치구']} 한눈에 보기")
-        st.markdown(f'<span class="selected-chip">{selected_row["자치구"]}</span>', unsafe_allow_html=True)
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            render_metric_card("지하철 접근성", f"{int(selected_row['지하철역수'])}개 역", f"호선 {int(selected_row['호선수'])}개")
-        with c2:
-            render_metric_card("문화생활", f"{int(selected_row['문화공간수'])}곳", selected_row["많은문화생활"])
-        with c3:
-            render_metric_card("공원·도서관", f"공원 {int(selected_row['공원수'])} · 도서관 {int(selected_row['도서관수'])}", "생활 인프라 요약")
+    st.markdown('<div class="section-title">전체 순위</div>', unsafe_allow_html=True)
+    rank_view = score_df[["자치구", "추천점수_100", "평균월세", "생활물가평균", "지하철역수", "문화공간수", "공원수", "도서관수", "주요호선"]].copy()
+    rank_view.columns = ["자치구", "추천점수", "평균월세(만원)", "생활물가평균(원)", "지하철역수", "문화공간수", "공원수", "도서관수", "주요호선"]
+    st.dataframe(rank_view, use_container_width=True, hide_index=True)
 
-        radar_cols = ["월세점수", "물가점수", "교통점수", "문화점수", "공원점수", "도서관점수"]
-        current = ranked[ranked["자치구"] == st.session_state.selected_gu].iloc[0]
-        radar_fig = go.Figure()
-        radar_fig.add_trace(
-            go.Scatterpolar(
-                r=[current[c] * 100 for c in radar_cols],
-                theta=["월세", "물가", "교통", "문화", "공원", "도서관"],
-                fill="toself",
-                name=st.session_state.selected_gu,
-                line=dict(color="#0F62FE", width=3),
-                fillcolor="rgba(15,98,254,0.22)",
-            )
-        )
-        radar_fig.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, 100], tickfont=dict(size=10))),
-            showlegend=False,
-            margin=dict(l=10, r=10, t=10, b=10),
-            height=360,
-        )
-        st.plotly_chart(radar_fig, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with right:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.subheader("추천 지역 순위표")
-        view_cols = ["자치구", "추천점수", "avg_monthly_rent", "생활물가평균", "지하철역수", "문화공간수", "공원수", "도서관수"]
-        show = candidates[view_cols].copy()
-        show.columns = ["자치구", "추천점수", "평균월세(만원)", "생활물가평균(원)", "지하철역수", "문화공간수", "공원수", "도서관수"]
-        show["추천점수"] = show["추천점수"].round(1)
-        show["생활물가평균(원)"] = show["생활물가평균(원)"].round().astype(int)
-        st.dataframe(show, use_container_width=True, hide_index=True, height=415)
-        st.markdown("</div>", unsafe_allow_html=True)
+    chart_df = score_df.sort_values("추천점수_100", ascending=True)
+    fig = px.bar(
+        chart_df,
+        x="추천점수_100",
+        y="자치구",
+        orientation="h",
+        text="추천점수_100",
+        color="추천점수_100",
+        color_continuous_scale="Blues",
+        labels={"추천점수_100": "추천 점수", "자치구": ""}
+    )
+    fig.update_layout(
+        height=700,
+        coloraxis_showscale=False,
+        margin=dict(l=10, r=10, t=10, b=10),
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+    )
+    fig.update_traces(textposition="outside")
+    st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.subheader("서울 자치구 지도")
-    st.caption("지도를 클릭하면 해당 자치구를 현재 선택 지역으로 바꿉니다. 지도가 불안정하면 아래 목록 선택으로도 동일하게 볼 수 있습니다.")
+    st.markdown('<div class="section-title">클릭해서 보는 서울 자치구 지도</div>', unsafe_allow_html=True)
+    st.caption("지도의 자치구를 클릭하면 해당 구의 핵심 정보가 팝업으로 표시됩니다. 상세 비교는 왼쪽 자치구 선택과 함께 보면 더 편합니다.")
+
     try:
         geojson = load_geojson()
-        fig = px.choropleth_mapbox(
-            ranked,
-            geojson=geojson,
-            locations="자치구",
-            featureidkey="properties.name",
-            color="추천점수",
-            color_continuous_scale="Blues",
-            mapbox_style="carto-positron",
-            center={"lat": 37.56, "lon": 126.99},
-            zoom=9.8,
-            opacity=0.72,
-            hover_name="자치구",
-            hover_data={
-                "추천점수": ":.1f",
-                "avg_monthly_rent": ":.1f",
-                "생활물가평균": True,
-                "지하철역수": True,
-                "문화공간수": True,
-                "공원수": True,
-            },
-            height=620,
-        )
-        fig.update_layout(
-            margin=dict(l=0, r=0, t=0, b=0),
-            coloraxis_colorbar=dict(title="추천점수"),
-        )
-        fig.update_traces(
-            hovertemplate="<b>%{hovertext}</b><br>추천점수 %{z:.1f}<br>평균월세 %{customdata[0]:.1f}만원<br>생활물가 %{customdata[1]:,}원<br>지하철역 %{customdata[2]}개<br>문화공간 %{customdata[3]}곳<br>공원 %{customdata[4]}곳<extra></extra>"
-        )
-        selected_points = plotly_events(
-            fig,
-            click_event=True,
-            hover_event=False,
-            select_event=False,
-            override_height=620,
-            key="district_map"
-        )
-        if selected_points:
-            loc = selected_points[0].get("pointIndex")
-            if loc is not None:
-                clicked_gu = ranked.iloc[loc]["자치구"]
-                st.session_state.selected_gu = clicked_gu
-                st.success(f"{clicked_gu}를 선택했어요. 아래 상세 정보가 갱신됩니다.")
-                selected_row = ranked[ranked["자치구"] == st.session_state.selected_gu].iloc[0]
-        else:
-            st.plotly_chart(fig, use_container_width=True)
-    except Exception:
-        st.warning("구역 지도를 불러오지 못해, 대체 지도로 보여드릴게요.")
-        fmap = folium.Map(location=[37.56, 126.99], zoom_start=11, tiles="CartoDB positron")
-        for _, row in ranked.iterrows():
-            lat, lon = DISTRICT_CENTERS[row["자치구"]]
-            popup = folium.Popup(
-                f"<b>{row['자치구']}</b><br>추천점수 {row['추천점수']:.1f}<br>평균월세 {row['avg_monthly_rent']:.1f}만원<br>문화공간 {int(row['문화공간수'])}곳",
-                max_width=250,
-            )
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=8 + row["추천점수"] / 25,
-                color="#0F62FE",
-                fill=True,
-                fill_opacity=0.75,
-                popup=popup,
-            ).add_to(fmap)
-        st_folium(fmap, width=1200, height=620)
-    st.markdown("</div>", unsafe_allow_html=True)
+        geo_df = score_df.copy()
+        geo_df["id"] = geo_df["자치구"]
 
-    selected_row = ranked[ranked["자치구"] == st.session_state.selected_gu].iloc[0]
-    st.markdown('<div class="section-card" style="margin-top:16px;">', unsafe_allow_html=True)
-    st.subheader(f"{st.session_state.selected_gu} 상세 정보")
-    col_a, col_b = st.columns([1.1, 0.9])
-    with col_a:
-        station_list = subway[subway["자치구"] == st.session_state.selected_gu]["역명"].dropna().astype(str).unique().tolist()
-        st.markdown(f"**평균 월세**: {selected_row['avg_monthly_rent']:.1f}만원")
-        st.markdown(f"**서울 평균 대비**: {comparison_text(selected_row['avg_monthly_rent'], seoul_rent['avg_monthly_rent'])}")
-        st.markdown(f"**생활물가 평균**: {int(round(selected_row['생활물가평균'])):,}원")
-        st.markdown(f"**지하철역**: {int(selected_row['지하철역수'])}개 / **주요 호선**: {selected_row['주요호선']}")
-        st.markdown(f"**역 목록**: {', '.join(station_list[:12]) if station_list else '-'}")
-    with col_b:
-        bar_df = pd.DataFrame({
-            "항목": ["문화공간", "도서관", "공원", "지하철역"],
-            "개수": [
-                int(selected_row["문화공간수"]),
-                int(selected_row["도서관수"]),
-                int(selected_row["공원수"]),
-                int(selected_row["지하철역수"]),
-            ],
-        })
-        bar_fig = px.bar(
-            bar_df,
-            x="항목",
-            y="개수",
-            text="개수",
-            color="항목",
-            color_discrete_sequence=["#0F62FE", "#7C3AED", "#10B981", "#F59E0B"],
-            height=320,
+        score_map = {r["자치구"]: float(r["추천점수_100"]) for _, r in geo_df.iterrows()}
+        rent_map = {r["자치구"]: int(r["평균월세"]) for _, r in geo_df.iterrows()}
+        culture_map = {r["자치구"]: int(r["문화공간수"]) for _, r in geo_df.iterrows()}
+        park_map = {r["자치구"]: int(r["공원수"]) for _, r in geo_df.iterrows()}
+        subway_map = {r["자치구"]: int(r["지하철역수"]) for _, r in geo_df.iterrows()}
+
+        for feature in geojson["features"]:
+            name = feature["properties"].get("name")
+            feature["properties"]["추천점수"] = score_map.get(name, 0)
+            feature["properties"]["평균월세"] = rent_map.get(name, 0)
+            feature["properties"]["문화공간수"] = culture_map.get(name, 0)
+            feature["properties"]["공원수"] = park_map.get(name, 0)
+            feature["properties"]["지하철역수"] = subway_map.get(name, 0)
+
+        m = folium.Map(location=[37.56, 126.98], zoom_start=10.5, tiles="CartoDB positron")
+
+        folium.Choropleth(
+            geo_data=geojson,
+            data=geo_df,
+            columns=["자치구", "추천점수_100"],
+            key_on="feature.properties.name",
+            fill_color="PuBu",
+            fill_opacity=0.78,
+            line_opacity=0.9,
+            line_color="#4b5563",
+            legend_name="추천 점수",
+            highlight=True
+        ).add_to(m)
+
+        popup = GeoJsonPopup(
+            fields=["name", "추천점수", "평균월세", "문화공간수", "공원수", "지하철역수"],
+            aliases=["자치구", "추천 점수", "평균 월세(만원)", "문화공간 수", "공원 수", "지하철역 수"],
+            labels=True,
+            localize=True,
         )
-        bar_fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(bar_fig, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+        tooltip = GeoJsonTooltip(
+            fields=["name", "추천점수", "평균월세"],
+            aliases=["자치구", "추천 점수", "평균 월세(만원)"],
+            sticky=True,
+        )
+
+        gj = folium.GeoJson(
+            geojson,
+            name="자치구",
+            style_function=lambda x: {
+                "fillColor": "#ffffff00",
+                "color": "#374151",
+                "weight": 1.2,
+            },
+            highlight_function=lambda x: {
+                "fillColor": "#93c5fd",
+                "color": "#1d4ed8",
+                "weight": 2.2,
+                "fillOpacity": 0.25,
+            },
+            tooltip=tooltip,
+            popup=popup,
+        )
+        gj.add_to(m)
+        folium.LayerControl(collapsed=True).add_to(m)
+        st_folium(m, width=None, height=720)
+    except Exception:
+        st.info("지도를 불러오지 못했어요. 인터넷 연결 상태를 확인하거나 잠시 후 다시 시도해 주세요.")
 
 with tab3:
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.subheader(f"{st.session_state.selected_gu}에서 즐길 수 있는 문화생활")
-    selected_culture = culture[culture["자치구"] == st.session_state.selected_gu].copy()
-    if selected_culture.empty:
-        st.info("이 지역의 문화공간 데이터가 없습니다.")
-    else:
-        category_counts = (
-            selected_culture["주제분류"].value_counts().rename_axis("주제분류").reset_index(name="개수")
+    st.markdown(f'<div class="section-title">{detail_district} 상세 정보</div>', unsafe_allow_html=True)
+
+    left, right = st.columns([1.08, 0.92])
+    with left:
+        st.markdown('<div class="detail-card">', unsafe_allow_html=True)
+        st.markdown("#### 핵심 요약")
+        reasons = district_reason(detail_row)
+        st.markdown("".join([f'<span class="tag">{r}</span>' for r in reasons]), unsafe_allow_html=True)
+
+        radar_df = pd.DataFrame({
+            "항목": ["월세", "생활물가", "교통", "문화생활", "공원·녹지", "도서관"],
+            "점수": [
+                float(detail_row["월세점수"]),
+                float(detail_row["생활물가점수"]),
+                float(detail_row["교통점수"]),
+                float(detail_row["문화점수"]),
+                float(detail_row["공원점수"]),
+                float(detail_row["도서관점수"]),
+            ]
+        })
+
+        radar = px.line_polar(
+            radar_df, r="점수", theta="항목", line_close=True, range_r=[0,1]
         )
-        c1, c2 = st.columns([0.9, 1.1])
-        with c1:
-            pie_fig = px.pie(
-                category_counts,
-                names="주제분류",
-                values="개수",
-                hole=0.45,
-                color="주제분류",
-                color_discrete_map=CATEGORY_COLORS,
-                height=360,
-            )
-            pie_fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), legend_title_text="")
-            st.plotly_chart(pie_fig, use_container_width=True)
-        with c2:
-            st.markdown("**많은 문화생활 유형**")
-            for _, row in category_counts.head(6).iterrows():
-                st.markdown(f'<span class="pill">{row["주제분류"]} {int(row["개수"])}곳</span>', unsafe_allow_html=True)
+        radar.update_traces(fill="toself")
+        radar.update_layout(
+            height=420,
+            margin=dict(l=30, r=30, t=10, b=10),
+            paper_bgcolor="white",
+        )
+        st.plotly_chart(radar, use_container_width=True)
 
-            free_ratio = (
-                (selected_culture["무료구분"].astype(str).str.contains("무료", na=False).mean() * 100)
-                if "무료구분" in selected_culture.columns else 0
-            )
-            st.markdown(f"**무료 이용 가능 비중**: 약 {free_ratio:.0f}%")
-            st.markdown(f"**대표 문화공간 예시**: " + ", ".join(selected_culture["문화시설명"].dropna().astype(str).head(8).tolist()))
+        compare_df = pd.DataFrame({
+            "항목": ["평균월세", "생활물가평균", "문화공간수", "공원수", "도서관수", "지하철역수"],
+            detail_district: [
+                int(detail_row["평균월세"]),
+                int(detail_row["생활물가평균"]),
+                int(detail_row["문화공간수"]),
+                int(detail_row["공원수"]),
+                int(detail_row["도서관수"]),
+                int(detail_row["지하철역수"]),
+            ],
+            "서울평균": [
+                int(round(district_df["평균월세"].mean())),
+                int(round(district_df["생활물가평균"].mean())),
+                int(round(district_df["문화공간수"].mean())),
+                int(round(district_df["공원수"].mean())),
+                int(round(district_df["도서관수"].mean())),
+                int(round(district_df["지하철역수"].mean())),
+            ]
+        })
+        bar = px.bar(compare_df, x="항목", y=[detail_district, "서울평균"], barmode="group")
+        bar.update_layout(height=360, margin=dict(l=10, r=10, t=10, b=10), legend_title_text="")
+        st.plotly_chart(bar, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        detail_cols = ["주제분류", "문화시설명", "주소", "무료구분", "전화번호", "지하철"]
-        exist_cols = [c for c in detail_cols if c in selected_culture.columns]
-        st.markdown("**문화공간 상세 목록**")
-        st.dataframe(selected_culture[exist_cols].sort_values("주제분류"), use_container_width=True, hide_index=True, height=400)
-    st.markdown("</div>", unsafe_allow_html=True)
+    with right:
+        st.markdown('<div class="detail-card">', unsafe_allow_html=True)
+        st.markdown("#### 문화생활은 무엇이 많은가?")
+        district_culture_types = culture_type_counts[culture_type_counts["자치구"] == detail_district].head(8)
+        if district_culture_types.empty:
+            st.write("등록된 문화공간 정보가 없어요.")
+        else:
+            for _, r in district_culture_types.iterrows():
+                st.markdown(f'<span class="tag">{r["문화카테고리"]} {int(r["개수"])}곳</span>', unsafe_allow_html=True)
+
+        st.markdown("#### 대표 문화공간")
+        district_culture = culture[culture["자치구"] == detail_district][["문화시설명", "주제분류", "주소"]].head(10)
+        if len(district_culture):
+            st.dataframe(district_culture, use_container_width=True, hide_index=True)
+        else:
+            st.write("표시할 문화공간 정보가 없어요.")
+
+        st.markdown("#### 지하철")
+        district_subway = subway[subway["자치구"] == detail_district]
+        lines = sorted(district_subway["호선"].dropna().astype(str).unique().tolist())
+        stations = district_subway["역명"].dropna().astype(str).unique().tolist()
+        st.markdown("".join([f'<span class="tag">{line}</span>' for line in lines]) if lines else '<span class="small-note">호선 정보 없음</span>', unsafe_allow_html=True)
+        st.markdown(f'<div class="small-note">주요 역: {", ".join(stations[:12]) if stations else "없음"}</div>', unsafe_allow_html=True)
+
+        st.markdown("#### 공원 & 도서관")
+        district_parks = parks[parks[park_district_col] == detail_district]["공원명"].dropna().astype(str).tolist()
+        district_libraries = library[library["구명"] == detail_district]["도서관명"].dropna().astype(str).tolist()
+        st.markdown(f'<div class="small-note"><b>공원</b>: {", ".join(district_parks[:8]) if district_parks else "없음"}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="small-note" style="margin-top:0.35rem;"><b>도서관</b>: {", ".join(district_libraries[:8]) if district_libraries else "없음"}</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="section-title">생활물가 한눈에 보기</div>', unsafe_allow_html=True)
+    district_prices = prices[prices["자치구 이름"] == detail_district].copy()
+    if len(district_prices):
+        top_items = (
+            district_prices.groupby("품목 이름")["가격(원)"].mean()
+            .sort_values(ascending=False)
+            .head(12)
+            .round().astype(int)
+            .reset_index()
+        )
+        item_chart = px.bar(top_items.sort_values("가격(원)"), x="가격(원)", y="품목 이름", orientation="h")
+        item_chart.update_layout(height=450, margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(item_chart, use_container_width=True)
+    else:
+        st.info("생활물가 데이터가 없어요.")
 
 with tab4:
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.subheader("서울 전체 자치구 비교")
-    compare_cols = st.columns([1.1, 0.9])
-    with compare_cols[0]:
-        scatter = px.scatter(
-            ranked,
-            x="avg_monthly_rent",
-            y="추천점수",
-            size="문화공간수",
-            color="생활물가평균",
-            hover_name="자치구",
-            color_continuous_scale="Viridis",
-            height=430,
-            labels={
-                "avg_monthly_rent": "평균 월세(만원)",
-                "추천점수": "추천점수",
-                "생활물가평균": "생활물가 평균(원)",
-            }
-        )
-        scatter.update_layout(margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(scatter, use_container_width=True)
-    with compare_cols[1]:
-        rent_order = ranked.sort_values("avg_monthly_rent")
-        line = px.bar(
-            rent_order,
-            x="자치구",
-            y="avg_monthly_rent",
-            color="avg_monthly_rent",
-            color_continuous_scale="Blues",
-            height=430,
-            labels={"avg_monthly_rent": "평균 월세(만원)"},
-        )
-        line.update_layout(margin=dict(l=10, r=10, t=10, b=10), coloraxis_showscale=False)
-        st.plotly_chart(line, use_container_width=True)
-    st.caption(f"생활물가 평균은 {price_month_label} 기준 가격 데이터를 자치구별로 평균한 값이며, 정수 단위로 반올림해 표시했습니다.")
-    st.caption(f"월세 데이터는 {'업로드한 전월세 CSV를 직접 읽어 계산' if used_uploaded_rent else '업로드 때 계산한 요약값을 코드에 내장해 사용'}했습니다.")
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="section-title">원본 기반 요약 데이터</div>', unsafe_allow_html=True)
+    st.caption("생활물가는 정수 단위로 반올림해 표시했습니다.")
+    data_view = district_df.copy()
+    data_view["생활물가평균"] = data_view["생활물가평균"].round().astype(int)
+    st.dataframe(data_view, use_container_width=True, hide_index=True)
