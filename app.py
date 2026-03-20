@@ -8,7 +8,6 @@ import folium
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import requests
 import streamlit as st
 from sklearn.preprocessing import MinMaxScaler
 from streamlit_folium import st_folium
@@ -25,103 +24,117 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Bebas+Neue&display=swap');
     :root{
-        --navy:#253F52;
-        --orange:#F9852D;
-        --mustard:#F2C84B;
-        --sage:#9CBA7B;
-        --teal:#68A595;
-        --cream:#F8FAFC;
-        --ink:#0F172A;
-        --muted:#5B6776;
-        --line:#D8E2EB;
-        --soft:#EEF3F6;
+        --navy:#23435A;
+        --orange:#FA7F2D;
+        --mustard:#F2C64D;
+        --sage:#9EBC7C;
+        --teal:#67A394;
+        --cream:#F7FAFC;
+        --ink:#183247;
+        --muted:#5C7283;
+        --line:#D7E1E8;
+        --soft:#EFF4F7;
+        --panel:#FFFFFF;
     }
-    .block-container {padding-top: 1rem; padding-bottom: 2rem; max-width: 1350px;}
-    html, body, [class*="css"]  {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", sans-serif;
-        color: var(--ink);
+    html, body, [class*="css"] {
+        font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        color:var(--ink);
+        background: linear-gradient(180deg,#fff 0%, #fbfcfd 100%);
     }
-    h1,h2,h3{letter-spacing:-0.02em;}
+    .block-container {padding-top: 1.1rem; padding-bottom: 2.2rem; max-width: 1360px;}
+    h1,h2,h3{letter-spacing:-0.02em; color:var(--ink);}
+
     .hero{
-        background: linear-gradient(135deg, var(--navy) 0%, var(--orange) 38%, var(--mustard) 68%, var(--teal) 100%);
+        background: linear-gradient(120deg, var(--navy) 0%, var(--orange) 24%, var(--mustard) 48%, var(--sage) 72%, var(--teal) 100%);
         border-radius: 28px;
         padding: 28px 30px;
-        color: white;
+        color:white;
         margin-bottom: 18px;
-        box-shadow: 0 18px 40px rgba(37,63,82,.18);
+        box-shadow: 0 18px 40px rgba(35,67,90,.18);
     }
-    .hero h1{margin:0 0 8px 0; font-size:2rem; font-weight:900; color:white;}
-    .hero p{margin:0; line-height:1.65; font-size:1rem; color:rgba(255,255,255,.96);}
+    .hero h1{
+        margin:0 0 10px 0;
+        color:white !important;
+        font-family:'Bebas Neue','Noto Sans KR',sans-serif;
+        font-size:2.5rem;
+        letter-spacing:1px;
+    }
+    .hero p{margin:0; line-height:1.72; font-size:1rem; color:rgba(255,255,255,.96);}
     .badge{
-        display:inline-block; margin-top:12px; margin-right:8px; padding:6px 12px;
-        border-radius:999px; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.25);
-        font-size:.82rem; font-weight:700; color:white;
-    }
-    .panel{
-        background:white; border:1px solid var(--line); border-radius:22px; padding:18px;
-        box-shadow: 0 8px 24px rgba(15,23,42,.05);
+        display:inline-block; margin-top:12px; margin-right:8px; padding:7px 13px;
+        border-radius:999px; background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.28);
+        font-size:.82rem; font-weight:700; color:white; backdrop-filter: blur(4px);
     }
     .metric-card{
-        background: linear-gradient(180deg,#fff 0%, #f9fbfd 100%);
+        background:linear-gradient(180deg,#fff 0%, #f9fbfd 100%);
         border:1px solid var(--line);
-        border-radius:20px; padding:18px; min-height:132px; box-shadow:0 6px 18px rgba(37,63,82,.06);
+        border-radius:22px; padding:18px; min-height:134px;
+        box-shadow:0 10px 24px rgba(24,50,71,.06);
     }
-    .metric-kicker{font-size:.84rem; color:var(--muted); font-weight:700; margin-bottom:8px;}
-    .metric-value{font-size:1.9rem; font-weight:900; color:var(--ink); line-height:1.1;}
-    .metric-desc{font-size:.88rem; color:var(--muted); line-height:1.55; margin-top:8px;}
+    .metric-kicker{font-size:.84rem; color:var(--muted); font-weight:800; margin-bottom:8px;}
+    .metric-value{font-size:1.95rem; font-weight:900; color:var(--ink); line-height:1.1;}
+    .metric-desc{font-size:.88rem; color:var(--muted); line-height:1.58; margin-top:8px;}
+
     .top-card{
-        border-radius:22px; padding:18px; height:100%;
+        border-radius:24px; padding:18px; height:100%;
         border:1px solid var(--line);
-        box-shadow:0 10px 26px rgba(15,23,42,.05);
-        background:white;
+        box-shadow:0 12px 28px rgba(24,50,71,.06);
+        background:linear-gradient(180deg,#fff 0%, #fbfdfe 100%);
     }
-    .top-rank{font-size:.82rem; font-weight:800; margin-bottom:8px;}
-    .top-name{font-size:1.35rem; font-weight:900; color:var(--ink); margin-bottom:10px;}
-    .top-meta{font-size:.92rem; line-height:1.65; color:#334155;}
+    .top-rank{font-size:.82rem; font-weight:900; margin-bottom:8px; color:var(--muted);}
+    .top-name{font-size:1.4rem; font-weight:900; color:var(--ink) !important; margin-bottom:10px;}
+    .top-meta{font-size:.92rem; line-height:1.7; color:#334155;}
     .rank-1{border-top:8px solid #ef4444;}
     .rank-2{border-top:8px solid #f97316;}
     .rank-3{border-top:8px solid #eab308;}
     .rank-4{border-top:8px solid #22c55e;}
     .rank-5{border-top:8px solid #3b82f6;}
+
     .chip{
-        display:inline-block; border-radius:999px; padding:5px 10px; margin:0 6px 6px 0;
-        background:#eff6ff; color:#1d4ed8; font-size:.8rem; font-weight:700; border:1px solid #dbeafe;
+        display:inline-block; border-radius:999px; padding:6px 11px; margin:0 6px 6px 0;
+        background:#eef6ff; color:#1d4ed8; font-size:.8rem; font-weight:700; border:1px solid #dbeafe;
     }
-    .chip-dark{background:#eef6f3; color:#0f766e; border:1px solid #cce8e0;}
-    .soft-box{
-        background:#f8fafc; border:1px solid #e2e8f0; border-radius:18px; padding:16px; line-height:1.65;
+    .chip-dark{background:#eef7f4; color:#0f766e; border:1px solid #cce7df;}
+    .soft-box,
+    .compare-card,
+    .nav-card{
+        background:white; border:1px solid var(--line); border-radius:18px; padding:16px; line-height:1.68;
+        box-shadow:0 8px 20px rgba(24,50,71,.04);
     }
     .warn-box{
         background:#fff7ed; border:1px solid #fed7aa; border-left:5px solid var(--orange);
-        border-radius:18px; padding:16px; color:#9a3412; line-height:1.65;
+        border-radius:18px; padding:16px; color:#9a3412; line-height:1.68;
     }
     .good-box{
         background:#ecfdf5; border:1px solid #bbf7d0; border-left:5px solid var(--teal);
-        border-radius:18px; padding:16px; color:#065f46; line-height:1.65;
+        border-radius:18px; padding:16px; color:#065f46; line-height:1.68;
     }
-    .nav-card{
-        background:white; border:1px solid var(--line); border-radius:20px; padding:14px 16px;
-        box-shadow:0 4px 12px rgba(15,23,42,.04);
-    }
-    .section-title{font-size:1.15rem; font-weight:900; color:var(--ink); margin-bottom:10px;}
+    .section-title{font-size:1.1rem; font-weight:900; color:var(--ink); margin-bottom:10px;}
     .small{font-size:.84rem; color:var(--muted);}
+    .footer-note{font-size:.82rem; color:#64748b; line-height:1.7;}
+
     .stTabs [data-baseweb="tab-list"] {gap: 8px;}
     .stTabs [data-baseweb="tab"] {
         height: 44px; border-radius:999px; border:1px solid var(--line);
-        background:#fff;
-        padding-left:16px; padding-right:16px;
+        background:#fff; padding-left:16px; padding-right:16px; font-weight:700;
     }
     .stTabs [aria-selected="true"] {background: #f8fafc;}
     div[data-testid="stMetricValue"] {font-weight: 800;}
-    .compare-card{
-        background:#fff; border:1px solid var(--line); border-radius:18px; padding:16px; min-height:190px;
+    .stRadio > div {gap: .5rem;}
+    div[role="radiogroup"] > label {
+        background:#fff; border:1px solid var(--line); border-radius:999px; padding:.3rem .8rem;
     }
-    .footer-note{font-size:.82rem; color:#64748b; line-height:1.7;}
+    div[role="radiogroup"] > label:has(input:checked) {
+        background:#f8fafc; border-color:#b9ced9;
+    }
+    .stMultiSelect, .stSelectbox, .stTextInput {font-size:0.95rem;}
     </style>
     """,
     unsafe_allow_html=True,
 )
+
 
 # ============================================================
 # 상수
@@ -593,11 +606,34 @@ def build_reason(row: pd.Series, seoul_avg_rent: float, university: str, work_pl
 # ============================================================
 @st.cache_data(show_spinner=False)
 def load_geojson():
-    url = "https://raw.githubusercontent.com/southkorea/seoul-maps/master/kostat/2013/json/seoul_municipalities_geo_simple.json"
-    try:
-        return requests.get(url, timeout=8).json()
-    except Exception:
-        return None
+    features = [
+      {"type":"Feature","id":"강남구","properties":{"name":"강남구"},"geometry":{"type":"Polygon","coordinates":[[[127.0635,37.5172],[127.0531,37.4938],[127.0531,37.4792],[127.0707,37.4679],[127.0865,37.4679],[127.1054,37.4877],[127.1054,37.5023],[127.0865,37.5172],[127.0635,37.5172]]]}} ,
+      {"type":"Feature","id":"강동구","properties":{"name":"강동구"},"geometry":{"type":"Polygon","coordinates":[[[127.1054,37.5023],[127.1054,37.4877],[127.1243,37.4795],[127.1710,37.4959],[127.1710,37.5413],[127.1243,37.5413],[127.1054,37.5310],[127.1054,37.5023]]]}} ,
+      {"type":"Feature","id":"강북구","properties":{"name":"강북구"},"geometry":{"type":"Polygon","coordinates":[[[126.9882,37.6376],[126.9882,37.6225],[127.0071,37.6151],[127.0260,37.6151],[127.0449,37.6225],[127.0449,37.6526],[127.0260,37.6676],[126.9882,37.6676],[126.9882,37.6376]]]}} ,
+      {"type":"Feature","id":"강서구","properties":{"name":"강서구"},"geometry":{"type":"Polygon","coordinates":[[[126.7930,37.5413],[126.7930,37.5188],[126.8308,37.5038],[126.8686,37.5038],[126.8875,37.5188],[126.8875,37.5863],[126.8497,37.5863],[126.8119,37.5713],[126.7930,37.5413]]]}} ,
+      {"type":"Feature","id":"관악구","properties":{"name":"관악구"},"geometry":{"type":"Polygon","coordinates":[[[126.9005,37.4942],[126.9005,37.4642],[126.9383,37.4567],[126.9572,37.4567],[126.9761,37.4642],[126.9761,37.4942],[126.9383,37.5017],[126.9005,37.4942]]]}} ,
+      {"type":"Feature","id":"광진구","properties":{"name":"광진구"},"geometry":{"type":"Polygon","coordinates":[[[127.0543,37.5685],[127.0543,37.5310],[127.0732,37.5310],[127.1054,37.5310],[127.1054,37.5610],[127.0732,37.5685],[127.0543,37.5685]]]}} ,
+      {"type":"Feature","id":"구로구","properties":{"name":"구로구"},"geometry":{"type":"Polygon","coordinates":[[[126.8308,37.5263],[126.8308,37.4888],[126.8686,37.4738],[126.9005,37.4738],[126.9005,37.5038],[126.8686,37.5188],[126.8497,37.5263],[126.8308,37.5263]]]}} ,
+      {"type":"Feature","id":"금천구","properties":{"name":"금천구"},"geometry":{"type":"Polygon","coordinates":[[[126.8686,37.4738],[126.8686,37.4413],[126.9005,37.4338],[126.9194,37.4338],[126.9194,37.4738],[126.9005,37.4888],[126.8686,37.4738]]]}} ,
+      {"type":"Feature","id":"노원구","properties":{"name":"노원구"},"geometry":{"type":"Polygon","coordinates":[[[127.0449,37.6226],[127.0449,37.6376],[127.0638,37.6376],[127.0827,37.6526],[127.0827,37.6676],[127.0638,37.6751],[127.0260,37.6676],[127.0071,37.6526],[127.0260,37.6301],[127.0449,37.6226]]]}} ,
+      {"type":"Feature","id":"도봉구","properties":{"name":"도봉구"},"geometry":{"type":"Polygon","coordinates":[[[127.0071,37.6376],[127.0071,37.6526],[127.0260,37.6676],[127.0449,37.6676],[127.0449,37.6826],[127.0260,37.6901],[126.9882,37.6826],[126.9882,37.6676],[127.0071,37.6376]]]}} ,
+      {"type":"Feature","id":"동대문구","properties":{"name":"동대문구"},"geometry":{"type":"Polygon","coordinates":[[[127.0260,37.5760],[127.0260,37.5610],[127.0449,37.5535],[127.0638,37.5535],[127.0827,37.5610],[127.0827,37.5910],[127.0449,37.5985],[127.0260,37.5760]]]}} ,
+      {"type":"Feature","id":"동작구","properties":{"name":"동작구"},"geometry":{"type":"Polygon","coordinates":[[[126.9194,37.5263],[126.9194,37.4888],[126.9572,37.4888],[126.9761,37.5038],[126.9761,37.5263],[126.9383,37.5338],[126.9194,37.5263]]]}} ,
+      {"type":"Feature","id":"마포구","properties":{"name":"마포구"},"geometry":{"type":"Polygon","coordinates":[[[126.8875,37.5788],[126.8875,37.5413],[126.9194,37.5338],[126.9572,37.5338],[126.9572,37.5638],[126.9383,37.5863],[126.9005,37.5863],[126.8875,37.5788]]]}} ,
+      {"type":"Feature","id":"서대문구","properties":{"name":"서대문구"},"geometry":{"type":"Polygon","coordinates":[[[126.9194,37.5788],[126.9194,37.5638],[126.9383,37.5563],[126.9572,37.5563],[126.9761,37.5638],[126.9761,37.5938],[126.9572,37.6013],[126.9194,37.5938],[126.9194,37.5788]]]}} ,
+      {"type":"Feature","id":"서초구","properties":{"name":"서초구"},"geometry":{"type":"Polygon","coordinates":[[[127.0071,37.5172],[127.0071,37.4792],[127.0260,37.4642],[127.0449,37.4642],[127.0638,37.4792],[127.0638,37.5172],[127.0260,37.5247],[127.0071,37.5172]]]}} ,
+      {"type":"Feature","id":"성동구","properties":{"name":"성동구"},"geometry":{"type":"Polygon","coordinates":[[[127.0260,37.5685],[127.0260,37.5460],[127.0449,37.5385],[127.0638,37.5385],[127.0827,37.5460],[127.0827,37.5685],[127.0638,37.5760],[127.0260,37.5685]]]}} ,
+      {"type":"Feature","id":"성북구","properties":{"name":"성북구"},"geometry":{"type":"Polygon","coordinates":[[[126.9761,37.6076],[126.9761,37.5863],[126.9950,37.5788],[127.0260,37.5788],[127.0449,37.5938],[127.0449,37.6226],[127.0260,37.6226],[126.9950,37.6076],[126.9761,37.6076]]]}} ,
+      {"type":"Feature","id":"송파구","properties":{"name":"송파구"},"geometry":{"type":"Polygon","coordinates":[[[127.0827,37.5310],[127.0827,37.4885],[127.1054,37.4795],[127.1243,37.4795],[127.1243,37.5310],[127.1054,37.5310],[127.0827,37.5310]]]}} ,
+      {"type":"Feature","id":"양천구","properties":{"name":"양천구"},"geometry":{"type":"Polygon","coordinates":[[[126.8308,37.5413],[126.8308,37.5113],[126.8497,37.5038],[126.8686,37.5038],[126.8875,37.5188],[126.8875,37.5413],[126.8686,37.5563],[126.8308,37.5413]]]}} ,
+      {"type":"Feature","id":"영등포구","properties":{"name":"영등포구"},"geometry":{"type":"Polygon","coordinates":[[[126.9005,37.5338],[126.9005,37.5038],[126.9194,37.4963],[126.9383,37.4963],[126.9572,37.5038],[126.9572,37.5338],[126.9194,37.5488],[126.9005,37.5338]]]}} ,
+      {"type":"Feature","id":"용산구","properties":{"name":"용산구"},"geometry":{"type":"Polygon","coordinates":[[[126.9572,37.5563],[126.9572,37.5188],[126.9761,37.5113],[126.9950,37.5113],[127.0071,37.5263],[127.0071,37.5488],[126.9950,37.5638],[126.9572,37.5638],[126.9572,37.5563]]]}} ,
+      {"type":"Feature","id":"은평구","properties":{"name":"은평구"},"geometry":{"type":"Polygon","coordinates":[[[126.9005,37.6376],[126.9005,37.5938],[126.9194,37.5863],[126.9572,37.5863],[126.9761,37.6076],[126.9761,37.6376],[126.9572,37.6526],[126.9194,37.6451],[126.9005,37.6376]]]}} ,
+      {"type":"Feature","id":"종로구","properties":{"name":"종로구"},"geometry":{"type":"Polygon","coordinates":[[[126.9572,37.6151],[126.9572,37.5788],[126.9761,37.5713],[126.9950,37.5713],[127.0071,37.5863],[127.0071,37.6151],[126.9950,37.6301],[126.9572,37.6226],[126.9572,37.6151]]]}} ,
+      {"type":"Feature","id":"중구","properties":{"name":"중구"},"geometry":{"type":"Polygon","coordinates":[[[126.9761,37.5713],[126.9761,37.5488],[126.9950,37.5413],[127.0071,37.5488],[127.0071,37.5713],[126.9950,37.5788],[126.9761,37.5713]]]}} ,
+      {"type":"Feature","id":"중랑구","properties":{"name":"중랑구"},"geometry":{"type":"Polygon","coordinates":[[[127.0827,37.5985],[127.0827,37.5685],[127.1016,37.5610],[127.1205,37.5610],[127.1205,37.5985],[127.1016,37.6226],[127.0827,37.6226],[127.0827,37.5985]]]}}
+    ]
+    return {"type": "FeatureCollection", "features": features}
 
 def make_rank_map(filtered_df: pd.DataFrame, top5_names: List[str], rank_color_map: Dict[str, str]):
     fmap = folium.Map(location=[37.55, 126.98], zoom_start=11, tiles="cartodbpositron")
