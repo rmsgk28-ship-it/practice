@@ -2,214 +2,95 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
-import folium
-from streamlit_folium import st_folium
+from sklearn.preprocessing import MinMaxScaler
 
 st.set_page_config(
-    page_title="서울 자취 추천 플랫폼",
-    page_icon="🏠",
-    layout="wide"
+page_title="서울 자취 추천 플랫폼",
+layout="wide"
 )
 
 st.title("서울 자취 추천 플랫폼")
-st.caption("서울 25개 자치구 정주 데이터 기반 자취 추천 서비스")
 
-# ---------------------------------
-# 데이터 (보고서 기반)
-# ---------------------------------
+st.markdown("당신의 우선순위를 선택하면 자취하기 좋은 지역을 추천합니다.")
 
-data = {
-"자치구":[
-"강남구","강동구","강북구","강서구","관악구","광진구","구로구","금천구","노원구","도봉구",
-"동대문구","동작구","마포구","서대문구","서초구","성동구","성북구","송파구","양천구","영등포구",
-"용산구","은평구","종로구","중구","중랑구"
-],
+# -----------------------------------
+# 데이터 로드
+# -----------------------------------
 
-"월세":[95,72,62,68,60,78,63,58,60,55,68,75,85,70,92,80,65,88,70,75,82,63,75,78,60],
+culture = pd.read_csv("서울시 문화공간 정보.csv")
+library = pd.read_csv("서울시 공공도서관 현황정보.csv")
+subway = pd.read_csv("서울교통공사_역주소 및 전화번호.csv")
+parks = pd.read_excel("서울시 주요 공원현황(2026 상반기).xlsx")
 
-"생활물가":[7361,5935,6424,6165,6629,7265,6021,6619,6837,6338,
-6384,6378,6705,6735,6680,6599,6973,7098,6593,6070,
-6978,6388,6702,6614,6687],
+# -----------------------------------
+# 자치구별 집계
+# -----------------------------------
 
-"문화시설":[115,24,23,25,21,33,40,20,33,33,
-39,32,53,36,62,33,62,62,27,27,
-66,33,250,83,19],
+culture_count = culture.groupby("자치구").size()
+library_count = library.groupby("자치구").size()
+park_count = parks.groupby("자치구").size()
+subway_count = subway.groupby("자치구").size()
 
-"공원":[7,7,3,10,2,2,4,4,2,6,
-4,7,5,4,6,5,3,7,5,5,
-2,7,12,6,5],
+df = pd.DataFrame({
+"문화시설":culture_count,
+"도서관":library_count,
+"공원":park_count,
+"지하철":subway_count
+}).fillna(0)
 
-"지하철":[
-"2,3,7,9","5,8,9","4","5","2","2,5,7","2,7","7","4,6,7","4,7",
-"1,2,5","2,4,7","2,5,6","2,3,5","2,3,4,7","2,3,5","4,6","2,3,5,8,9",
-"2,5","2,5,7","4,6","3,6","1,3,4,5,6","1,2,3,4,5,6","6,7"
-]
-}
+# -----------------------------------
+# 정규화
+# -----------------------------------
 
-df = pd.DataFrame(data)
+scaler = MinMaxScaler()
 
-# ---------------------------------
-# 점수 계산
-# ---------------------------------
-
-df["월세_score"] = 1 - (df["월세"]-df["월세"].min())/(df["월세"].max()-df["월세"].min())
-df["문화_score"] = (df["문화시설"]-df["문화시설"].min())/(df["문화시설"].max()-df["문화시설"].min())
-df["공원_score"] = (df["공원"]-df["공원"].min())/(df["공원"].max()-df["공원"].min())
-df["물가_score"] = 1 - (df["생활물가"]-df["생활물가"].min())/(df["생활물가"].max()-df["생활물가"].min())
-
-df["자취점수"] = (
-df["월세_score"]*0.4 +
-df["문화_score"]*0.2 +
-df["공원_score"]*0.2 +
-df["물가_score"]*0.2
+df_scaled = pd.DataFrame(
+scaler.fit_transform(df),
+columns=df.columns,
+index=df.index
 )
 
-# ---------------------------------
-# 사이드바 필터
-# ---------------------------------
+# -----------------------------------
+# 사용자 우선순위
+# -----------------------------------
 
-st.sidebar.header("검색 옵션")
+st.sidebar.title("우선순위 설정")
 
-budget = st.sidebar.slider(
-"월세 예산 (만원)",
-40,
-120,
-70
+culture_w = st.sidebar.slider("문화시설",0.0,1.0,0.5)
+park_w = st.sidebar.slider("공원",0.0,1.0,0.5)
+transport_w = st.sidebar.slider("지하철",0.0,1.0,0.5)
+library_w = st.sidebar.slider("도서관",0.0,1.0,0.5)
+
+# -----------------------------------
+# 추천 점수
+# -----------------------------------
+
+df_scaled["score"] = (
+df_scaled["문화시설"] * culture_w +
+df_scaled["공원"] * park_w +
+df_scaled["지하철"] * transport_w +
+df_scaled["도서관"] * library_w
 )
 
-subway = st.sidebar.text_input(
-"지하철 호선 (예: 2)"
-)
+recommend = df_scaled.sort_values("score",ascending=False)
 
-# 필터
-filtered = df[df["월세"]<=budget]
+# -----------------------------------
+# 추천 결과
+# -----------------------------------
 
-if subway:
-    filtered = filtered[filtered["지하철"].str.contains(subway)]
+st.subheader("추천 지역 TOP5")
 
-# ---------------------------------
-# 추천 지역
-# ---------------------------------
+st.dataframe(recommend.head())
 
-st.subheader("AI 추천 자취 지역 TOP 5")
-
-top5 = filtered.sort_values("자취점수",ascending=False).head(5)
-
-st.dataframe(top5)
-
-# ---------------------------------
-# 월세 그래프
-# ---------------------------------
-
-st.subheader("서울 자치구 월세 비교")
+# -----------------------------------
+# 그래프
+# -----------------------------------
 
 fig = px.bar(
-df,
+recommend.reset_index(),
 x="자치구",
-y="월세",
-color="월세",
-title="서울 자치구 월세 비교"
+y="score",
+title="자취 추천 점수"
 )
 
-st.plotly_chart(fig,use_container_width=True)
-
-# ---------------------------------
-# 레이더 차트
-# ---------------------------------
-
-st.subheader("자취 적합도 분석")
-
-select_area = st.selectbox(
-"자치구 선택",
-df["자치구"]
-)
-
-area = df[df["자치구"]==select_area].iloc[0]
-
-categories = ["월세_score","문화_score","공원_score","물가_score"]
-
-values = [
-area["월세_score"],
-area["문화_score"],
-area["공원_score"],
-area["물가_score"]
-]
-
-fig = go.Figure()
-
-fig.add_trace(go.Scatterpolar(
-r=values,
-theta=["월세","문화","공원","물가"],
-fill='toself',
-name=select_area
-))
-
-fig.update_layout(
-polar=dict(
-radialaxis=dict(visible=True)
-),
-showlegend=False
-)
-
-st.plotly_chart(fig,use_container_width=True)
-
-# ---------------------------------
-# 지도
-# ---------------------------------
-
-st.subheader("서울 자치구 지도")
-
-coords = {
-"강남구":[37.5172,127.0473],
-"강동구":[37.5301,127.1238],
-"강북구":[37.6397,127.0257],
-"강서구":[37.5509,126.8495],
-"관악구":[37.4784,126.9516],
-"광진구":[37.5385,127.0822],
-"구로구":[37.4954,126.8874],
-"금천구":[37.4602,126.9006],
-"노원구":[37.6542,127.0568],
-"도봉구":[37.6688,127.0471],
-"동대문구":[37.5744,127.0395],
-"동작구":[37.5124,126.9393],
-"마포구":[37.5663,126.9014],
-"서대문구":[37.5791,126.9368],
-"서초구":[37.4837,127.0324],
-"성동구":[37.5634,127.0366],
-"성북구":[37.5894,127.0167],
-"송파구":[37.5145,127.1059],
-"양천구":[37.5169,126.8664],
-"영등포구":[37.5264,126.8962],
-"용산구":[37.5326,126.9900],
-"은평구":[37.6027,126.9291],
-"종로구":[37.5735,126.9788],
-"중구":[37.5640,126.9970],
-"중랑구":[37.6063,127.0927]
-}
-
-m = folium.Map(location=[37.55,126.98],zoom_start=11)
-
-for idx,row in df.iterrows():
-    lat,lon = coords[row["자치구"]]
-
-    score = round(row["자취점수"],2)
-
-    folium.Marker(
-        [lat,lon],
-        popup=f"""
-        <b>{row['자치구']}</b><br>
-        월세: {row['월세']}만원<br>
-        자취점수: {score}
-        """
-    ).add_to(m)
-
-st_folium(m,width=1200,height=600)
-
-# ---------------------------------
-# 데이터 테이블
-# ---------------------------------
-
-st.subheader("전체 데이터")
-
-st.dataframe(df)
+st.plotly_chart(fig)
