@@ -4,6 +4,6 @@ numpy
 plotly
 folium
 streamlit-folium
-scikit-learn
 openpyxl
 requests
+scikit-learn
